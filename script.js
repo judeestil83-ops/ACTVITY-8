@@ -1,5 +1,6 @@
 // Connection to Supabase (the "sb" variable) is in ../backend/supabase-client.js
-// Weather API (Python) is in ../api/weather_api.py
+// The /weather command asks Open-Meteo directly from the browser,
+// so no Python server is needed (api/weather_api.py is now optional).
 
 // ---------- 2. Grab the elements we need ----------
 const authScreen = document.getElementById("auth-screen");
@@ -19,7 +20,7 @@ const messageInput = document.getElementById("message-input");
 // ---------- 3. What the app remembers while it runs ----------
 let currentUser = null; // the logged-in user, or null
 const names = {}; // user id -> display name
-let channel = null; // the realtime connection (used in Part 4)
+let channel = null; // the realtime connection
 
 // ---------- 4. Sign up, log in, log out ----------
 async function signUp() {
@@ -102,7 +103,7 @@ function stopChat() {
 
 // ---------- 7. Show one message on the screen ----------
 function showMessage(msg) {
-  // Skip it if it is already on the screen (this matters in Part 4)
+  // Skip it if it is already on the screen
   if (messageList.querySelector('[data-id="' + msg.id + '"]')) return;
 
   const isMine = msg.user_id === currentUser.id;
@@ -222,16 +223,51 @@ function removeMessage(id) {
   if (item) item.remove();
 }
 
-// ---------- 11. The /weather command (asks our Python API) ----------
-const WEATHER_API_URL = "http://127.0.0.1:8000/weather";
+// ---------- 11. The /weather command (asks Open-Meteo directly) ----------
+const GEO_URL = "https://geocoding-api.open-meteo.com/v1/search";
+const WEATHER_URL = "https://api.open-meteo.com/v1/forecast";
+
+function describeWeather(code) {
+  if (code === 0) return "clear sky";
+  if (code <= 3) return "partly cloudy";
+  if (code <= 48) return "foggy";
+  if (code <= 57) return "drizzle";
+  if (code <= 67) return "rain";
+  if (code <= 77) return "snow";
+  if (code <= 82) return "rain showers";
+  if (code <= 86) return "snow showers";
+  return "thunderstorm";
+}
 
 async function getWeather(city) {
-  const response = await fetch(
-    WEATHER_API_URL + "?city=" + encodeURIComponent(city)
+  // Step 1: turn the city name into latitude and longitude
+  const geoResponse = await fetch(
+    GEO_URL + "?count=1&name=" + encodeURIComponent(city)
   );
-  if (!response.ok) throw new Error("Weather API failed");
-  const data = await response.json();
-  return data.message;
+  if (!geoResponse.ok) throw new Error("City lookup failed");
+  const geo = await geoResponse.json();
+
+  if (!geo.results || geo.results.length === 0) {
+    return "Sorry, I could not find a city named " + city + ".";
+  }
+  const place = geo.results[0];
+
+  // Step 2: ask for the current weather at that spot
+  const weatherResponse = await fetch(
+    WEATHER_URL +
+      "?latitude=" + place.latitude +
+      "&longitude=" + place.longitude +
+      "&current=temperature_2m,weather_code,wind_speed_10m"
+  );
+  if (!weatherResponse.ok) throw new Error("Weather lookup failed");
+  const now = (await weatherResponse.json()).current;
+
+  return (
+    place.name + ", " + (place.country || "") + ": " +
+    now.temperature_2m + " degrees C, " +
+    describeWeather(now.weather_code) + ", wind " +
+    now.wind_speed_10m + " km/h"
+  );
 }
 
 async function handleCommand(text) {
@@ -248,6 +284,7 @@ async function handleCommand(text) {
     return;
   }
 
+  showBotMessage("Checking the weather in " + city + "...");
   try {
     showBotMessage(await getWeather(city));
   } catch (error) {
