@@ -1,0 +1,12 @@
+# Huwag i-upload sa GitHub ang mga sikreto
+.env
+.env.*
+*.key
+secrets/
+# Mga file ng computer mo
+.DS_Store
+Thumbs.db
+node_modules/
+__pycache__/
+*.pyc
+config.env
